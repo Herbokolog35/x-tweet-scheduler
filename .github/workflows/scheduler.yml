@@ -1,33 +1,37 @@
 name: X Tweet Scheduler
 
 on:
-  # GitHub Actions en erken 5 dakikada bir tetikler
   schedule:
+    # Her 5 dakikada bir
     - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       FORCE_POST_NOW:
-        description: "Zaman kontrolünü atla (hemen gönder)"
         type: boolean
-        required: false
+        description: "Zaman kontrolünü atla ve şimdi gönder"
         default: false
+      WINDOW_SECONDS:
+        type: number
+        description: "Eşleşme penceresi (saniye)"
+        default: 180
       DRY_RUN:
-        description: "Dry run (gerçek tweet atma)"
         type: boolean
-        required: false
+        description: "Gerçek tweet atma (false = gerçek gönderim)"
         default: false
 
-  permissions:
+# <<< HATA BURADAYDI: permissions burada olmalı >>>
+permissions:
   contents: write
-
-# Aynı dal için eşzamanlı run'ların çakışmasını önleyelim
-concurrency:
-  group: x-tweet-scheduler-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   run:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+
+    env:
+      # Manuel tetikleme varsa inputları kullan, yoksa varsayılanları kullan
+      FORCE_POST_NOW: ${{ github.event.inputs.FORCE_POST_NOW || 'false' }}
+      WINDOW_SECONDS:  ${{ github.event.inputs.WINDOW_SECONDS  || '180'  }}
+      DRY_RUN:         ${{ github.event.inputs.DRY_RUN || 'false' }}
 
     steps:
       - name: Checkout
@@ -36,14 +40,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Bir önceki state.json varsa geri yükle
       - name: Restore previous state (if exists)
         uses: actions/cache@v4
         with:
@@ -55,22 +58,15 @@ jobs:
 
       - name: Run scheduler
         env:
-          # X (Twitter) API anahtarları
-          TW_CONSUMER_KEY: ${{ secrets.TW_CONSUMER_KEY }}
-          TW_CONSUMER_SECRET: ${{ secrets.TW_CONSUMER_SECRET }}
-          TW_ACCESS_TOKEN: ${{ secrets.TW_ACCESS_TOKEN }}
+          TW_CONSUMER_KEY:        ${{ secrets.TW_CONSUMER_KEY }}
+          TW_CONSUMER_SECRET:     ${{ secrets.TW_CONSUMER_SECRET }}
+          TW_ACCESS_TOKEN:        ${{ secrets.TW_ACCESS_TOKEN }}
           TW_ACCESS_TOKEN_SECRET: ${{ secrets.TW_ACCESS_TOKEN_SECRET }}
-
-          # Manuel tetiklerde input; cron tetiklerinde 'false'
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.DRY_RUN || 'false' }}
-          FORCE_POST_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.FORCE_POST_NOW || 'false' }}
-
-          # >>> Cron gecikmesine tolerans (saniye) — poster.py default'u bununla ezilecek
-          WINDOW_SECONDS: "180"
         run: |
           python -u src/poster.py
 
       - name: Show state after run
+        if: always()
         run: |
           if [ -f src/state.json ]; then
             echo "----- state.json -----"
@@ -79,7 +75,6 @@ jobs:
             echo "state.json yok"
           fi
 
-      # Güncel state'i sakla
       - name: Persist state
         if: always()
         uses: actions/cache/save@v4
