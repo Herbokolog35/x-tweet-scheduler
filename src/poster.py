@@ -1,23 +1,38 @@
+# -*- coding: utf-8 -*-
+"""
+X Tweet Scheduler — v2 API sürümü (Tweepy Client.create_tweet)
+- Zaman dilimi: Europe/Istanbul
+- Kaynaklar:
+  data/tweets.txt  -> her satır = 1 tweet (<= 280)
+  data/hours.txt   -> HH:MM (24s), örn: 08:00, 18:30
+- Durum (ilerleme) dosyası: src/state.json  (otomatik oluşturulur)
+- DRY_RUN=true ise sadece log yazar, tweet göndermez.
+"""
+
 import os
 import json
 from datetime import datetime
 from dateutil import tz
 import tweepy
 
+# Yollar
 STATE_PATH = os.path.join(os.path.dirname(__file__), 'state.json')
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 TWEETS_PATH = os.path.join(DATA_DIR, 'tweets.txt')
 HOURS_PATH = os.path.join(DATA_DIR, 'hours.txt')
 
+# Zaman dilimi
 IST = tz.gettz('Europe/Istanbul')
 
 
+# ---------- Yardımcılar ----------
 def load_lines(path: str):
     if not os.path.exists(path):
         return []
     with open(path, 'r', encoding='utf-8') as f:
-        return [ln.strip() for ln in f.readlines() if ln.strip()]
+        # boş satırları at
+        return [ln.strip() for ln in f if ln.strip()]
 
 
 def load_state():
@@ -27,25 +42,25 @@ def load_state():
         return json.load(f)
 
 
-def save_state(state):
+def save_state(state: dict):
     with open(STATE_PATH, 'w', encoding='utf-8') as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def now_ist():
+def now_ist() -> datetime:
     return datetime.now(tz=IST)
 
 
-def current_hhmm(dt: datetime) -> str:
+def hhmm(dt: datetime) -> str:
     return dt.strftime('%H:%M')
 
 
 def should_post_this_minute(hours_list, dt: datetime) -> bool:
-    # hours_list: ["08:00", "18:30", ...]
-    return current_hhmm(dt) in set(hours_list)
+    # hours_list ["08:00", "18:30", ...]
+    return hhmm(dt) in set(hours_list)
 
 
-def already_posted_this_minute(state, dt: datetime) -> bool:
+def already_posted_this_minute(state: dict, dt: datetime) -> bool:
     last = state.get('last_posted_iso')
     if not last:
         return False
@@ -53,29 +68,59 @@ def already_posted_this_minute(state, dt: datetime) -> bool:
         last_dt = datetime.fromisoformat(last)
     except Exception:
         return False
-    # aynı dakika içinde ikinci kez post etmeyi önle
-    return current_hhmm(last_dt) == current_hhmm(dt) and last_dt.date() == dt.date()
+    # aynı gün ve aynı dakika tekrarını engelle
+    return (hhmm(last_dt) == hhmm(dt)) and (last_dt.date() == dt.date())
 
 
-def get_api_client():
-    auth = tweepy.OAuth1UserHandler(
-        os.environ['TW_CONSUMER_KEY'],
-        os.environ['TW_CONSUMER_SECRET'],
-        os.environ['TW_ACCESS_TOKEN'],
-        os.environ['TW_ACCESS_TOKEN_SECRET']
+# ---------- X API v2 İstemcisi ----------
+def get_v2_client() -> tweepy.Client:
+    """
+    X API v2 ile tweet atmak için Tweepy Client.
+    Gerekli yetkiler: App 'Read and write', kullanıcı Access Token'ları yazma izni.
+    """
+    return tweepy.Client(
+        consumer_key=os.environ['TW_CONSUMER_KEY'],
+        consumer_secret=os.environ['TW_CONSUMER_SECRET'],
+        access_token=os.environ['TW_ACCESS_TOKEN'],
+        access_token_secret=os.environ['TW_ACCESS_TOKEN_SECRET'],
+        wait_on_rate_limit=True,
     )
-    return tweepy.API(auth)
 
 
-def post_tweet(text: str, dry_run: bool = False):
+def post_tweet(text: str, dry_run: bool = False) -> dict:
+    """
+    DRY_RUN etkinse sadece log yazar; değilse v2 `create_tweet` çağrılır.
+    Dönen değer {"id": "..."} biçimindedir.
+    """
+    # X karakter sınırı
+    if len(text) > 280:
+        text = text[:279]
+
     if dry_run:
-        print(f"[DRY_RUN] Tweet: {text[:60]}…")
+        print(f"[DRY_RUN] Tweet: {text[:160]}…")
         return {"id": None}
-    api = get_api_client()
-    status = api.update_status(status=text)
-    return {"id": getattr(status, 'id', None)}
+
+    client = get_v2_client()
+
+    try:
+        resp = client.create_tweet(text=text)
+        tweet_id = resp.data.get("id") if resp and resp.data else None
+        print("Tweet gönderildi. ID:", tweet_id)
+        return {"id": tweet_id}
+    except tweepy.Forbidden as e:
+        # Tipik: 453 kodlu “erişim seviyesi yetersiz” hatası
+        print("Tweepy Forbidden (403):", getattr(e, "api_codes", None), str(e))
+        print("Not: Uygulamanızın planı/izinleri yazma iznini desteklemelidir (Basic/Pro + Read&Write).")
+        raise
+    except tweepy.HTTPException as e:
+        print("Tweepy HTTPException:", getattr(e, "response", None))
+        raise
+    except Exception as e:
+        print("Beklenmeyen hata:", e)
+        raise
 
 
+# ---------- Giriş Noktası ----------
 def main():
     dry_run = os.getenv('DRY_RUN', 'false').lower() == 'true'
 
@@ -108,20 +153,18 @@ def main():
         return
 
     text = tweets[idx]
-    # Güvenlik: 280 sınırı
-    if len(text) > 280:
-        text = text[:279]
 
+    # Gönder
     try:
         resp = post_tweet(text, dry_run=dry_run)
+        # Başarılı kabul edilen her durumda state ilerletilir (DRY_RUN dahil)
         state['last_posted_iso'] = now.isoformat()
         state['next_index'] = idx + 1
         save_state(state)
-        print(f"Posted index {idx}. Tweet ID: {resp['id']}")
-    except tweepy.TweepyException as e:
-        print('Tweepy error:', e)
-    except Exception as e:
-        print('Unexpected error:', e)
+        print(f"Posted index {idx}. Tweet ID: {resp.get('id')}")
+    except Exception:
+        # Hata olursa state ilerletmeyin — tekrar denenir
+        print("Gönderim başarısız oldu; state güncellenmedi.")
 
 
 if __name__ == '__main__':
