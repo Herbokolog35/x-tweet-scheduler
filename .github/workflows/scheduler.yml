@@ -2,15 +2,21 @@ name: X Tweet Scheduler
 
 on:
   schedule:
-    # Her 5 dakikada bir tetiklenir; doğru dakikayı script kontrol eder
+    # Her 5 dakikada bir tetiklenir; doğru dakikada paylaşımı script karar verir
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
+
+# Eşzamanlı paralel çalışmaları engelle (çifte paylaşımı önler)
 concurrency:
   group: tweet-scheduler
   cancel-in-progress: true
+
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,12 +31,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Restore state (if exists)
+      # (Opsiyonel) Depo yapısını görmek için
+      - name: Debug tree
+        run: ls -R
+
+      - name: Restore previous state (if exists)
         uses: actions/cache@v4
         with:
           path: src/state.json
-          key: state-${{ github.run_id }}
+          # Dal ve işletim sistemi bazlı anahtar; gerektiğinde -v2 gibi son ekle reset için
+          key: state-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
+            state-${{ runner.os }}-${{ github.ref_name }}
             state-
 
       - name: Run scheduler
@@ -39,13 +51,24 @@ jobs:
           TW_CONSUMER_SECRET: ${{ secrets.TW_CONSUMER_SECRET }}
           TW_ACCESS_TOKEN: ${{ secrets.TW_ACCESS_TOKEN }}
           TW_ACCESS_TOKEN_SECRET: ${{ secrets.TW_ACCESS_TOKEN_SECRET }}
+          # Settings → Actions → Variables içinde DRY_RUN=true ise deneme modunda çalışır
           DRY_RUN: ${{ vars.DRY_RUN || 'false' }}
         run: |
           python -u src/poster.py
+
+      - name: Show state after run
+        if: always()
+        run: |
+          if [ -f src/state.json ]; then
+            echo "----- state.json -----"
+            cat src/state.json
+          else
+            echo "state.json yok"
+          fi
 
       - name: Persist state
         if: always()
         uses: actions/cache/save@v4
         with:
           path: src/state.json
-          key: state-${{ github.run_id }}
+          key: state-${{ runner.os }}-${{ github.ref_name }}
