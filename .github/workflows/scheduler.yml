@@ -5,7 +5,9 @@ on:
     # Her 5 dakikada bir tetiklenir; doğru dakikayı script kontrol eder
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
-
+concurrency:
+  group: tweet-scheduler
+  cancel-in-progress: true
 jobs:
   run:
     runs-on: ubuntu-latest
