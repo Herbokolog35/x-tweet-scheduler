@@ -19,6 +19,8 @@ on:
 
 permissions:
   contents: read
+  permissions:
+  contents: write
 
 # Aynı dal için eşzamanlı run'ların çakışmasını önleyelim
 concurrency:
