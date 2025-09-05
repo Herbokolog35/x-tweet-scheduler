@@ -3,7 +3,7 @@ name: X Tweet Scheduler
 on:
   schedule:
     # Her 5 dakikada bir tetiklenir; doğru dakikada paylaşımı script karar verir
-    - cron: '*/5 * * * *'
+    - cron: '* * * * *'
   workflow_dispatch: {}
 
 # Eşzamanlı paralel çalışmaları engelle (çifte paylaşımı önler)
