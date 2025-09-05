@@ -2,6 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 .env
-src/state.json
 .DS_Store
 Thumbs.db
