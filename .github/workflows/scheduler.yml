@@ -1,23 +1,26 @@
 name: X Tweet Scheduler
 
 on:
+  # GitHub Actions en erken 5 dakikada bir tetikler
   schedule:
-    # Her dakika tetikle
-    - cron: "* * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       FORCE_POST_NOW:
-        description: "Zaman kontrolünü atla (poster.py içindeki kontrolü bypass et)"
+        description: "Zaman kontrolünü atla (hemen gönder)"
+        type: boolean
         required: false
-        default: "false"
+        default: false
       DRY_RUN:
-        description: "Gerçek tweet atma (dry run)"
+        description: "Dry run (gerçek tweet atma)"
+        type: boolean
         required: false
-        default: "false"
+        default: false
 
 permissions:
   contents: read
 
+# Aynı dal için eşzamanlı run'ların çakışmasını önleyelim
 concurrency:
   group: x-tweet-scheduler-${{ github.ref }}
   cancel-in-progress: false
@@ -40,6 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Bir önceki state.json varsa geri yükle
       - name: Restore previous state (if exists)
         uses: actions/cache@v4
         with:
@@ -51,13 +55,18 @@ jobs:
 
       - name: Run scheduler
         env:
+          # X (Twitter) API anahtarları
           TW_CONSUMER_KEY: ${{ secrets.TW_CONSUMER_KEY }}
           TW_CONSUMER_SECRET: ${{ secrets.TW_CONSUMER_SECRET }}
           TW_ACCESS_TOKEN: ${{ secrets.TW_ACCESS_TOKEN }}
           TW_ACCESS_TOKEN_SECRET: ${{ secrets.TW_ACCESS_TOKEN_SECRET }}
-          # Manuel tetiklemelerde input; cron tetiklemelerde 'false'
+
+          # Manuel tetiklerde input; cron tetiklerinde 'false'
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.DRY_RUN || 'false' }}
           FORCE_POST_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.FORCE_POST_NOW || 'false' }}
+
+          # >>> Cron gecikmesine tolerans (saniye) — poster.py default'u bununla ezilecek
+          WINDOW_SECONDS: "180"
         run: |
           python -u src/poster.py
 
@@ -70,6 +79,7 @@ jobs:
             echo "state.json yok"
           fi
 
+      # Güncel state'i sakla
       - name: Persist state
         if: always()
         uses: actions/cache/save@v4
