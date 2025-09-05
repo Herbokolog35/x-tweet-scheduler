@@ -1,70 +1,45 @@
-name: X Tweet Scheduler
-
 on:
   schedule:
-    # Her 5 dakikada bir
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"   # sizde ne ise
   workflow_dispatch:
     inputs:
-      FORCE_POST_NOW:
+      force_post_now:
+        description: "Zaman kontrolünü atla"
         type: boolean
-        description: "Zaman kontrolünü atla ve şimdi gönder"
         default: false
-      WINDOW_SECONDS:
+      dry_run:
+        description: "Deneme modu (tweet atmaz)"
+        type: boolean
+        default: false          # <-- OTOMATİK ÇALIŞMALAR İÇİN KAPALI
+      window_seconds:
+        description: "Eşleşme toleransı (saniye)"
         type: number
-        description: "Eşleşme penceresi (saniye)"
-        default: 180
-      DRY_RUN:
-        type: boolean
-        description: "Gerçek tweet atma (false = gerçek gönderim)"
-        default: false
-
-# <<< HATA BURADAYDI: permissions burada olmalı >>>
-permissions:
-  contents: write
+        default: 600            # <-- 10 dakika tolerans
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
+    # Inputs verilmemişse (örn. cron tetiklediğinde) defaultları kullan
     env:
-      # Manuel tetikleme varsa inputları kullan, yoksa varsayılanları kullan
-      FORCE_POST_NOW: ${{ github.event.inputs.FORCE_POST_NOW || 'false' }}
-      WINDOW_SECONDS:  ${{ github.event.inputs.WINDOW_SECONDS  || '180'  }}
-      DRY_RUN:         ${{ github.event.inputs.DRY_RUN || 'false' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      FORCE_POST_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.force_post_now || 'false' }}
+      WINDOW_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.window_seconds || 600 }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Restore previous state (if exists)
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
         with:
           path: src/state.json
           key: state-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
             state-${{ runner.os }}-${{ github.ref_name }}
             state-
-
       - name: Run scheduler
-        env:
-          TW_CONSUMER_KEY:        ${{ secrets.TW_CONSUMER_KEY }}
-          TW_CONSUMER_SECRET:     ${{ secrets.TW_CONSUMER_SECRET }}
-          TW_ACCESS_TOKEN:        ${{ secrets.TW_ACCESS_TOKEN }}
-          TW_ACCESS_TOKEN_SECRET: ${{ secrets.TW_ACCESS_TOKEN_SECRET }}
-        run: |
-          python -u src/poster.py
-
+        run: python -u src/poster.py
       - name: Show state after run
         if: always()
         run: |
@@ -74,10 +49,8 @@ jobs:
           else
             echo "state.json yok"
           fi
-
-      - name: Persist state
+      - uses: actions/cache/save@v4
         if: always()
-        uses: actions/cache/save@v4
         with:
           path: src/state.json
           key: state-${{ runner.os }}-${{ github.ref_name }}
