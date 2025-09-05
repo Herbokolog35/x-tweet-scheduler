@@ -2,44 +2,35 @@ name: X Tweet Scheduler
 
 on:
   schedule:
-    # Her 5 dakikada bir tetiklenir; doğru dakikada paylaşımı script karar verir
-    - cron: '* * * * *'
-  workflow_dispatch: {}
-
-# Eşzamanlı paralel çalışmaları engelle (çifte paylaşımı önler)
-concurrency:
-  group: tweet-scheduler
-  cancel-in-progress: true
+    - cron: "* * * * *"   # her dakika tetiklenecek
+  workflow_dispatch:
+    inputs:
+      override:
+        description: "Zaman kontrolünü atla (FORCE_POST_NOW)"
+        type: boolean
+        default: true
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # (Opsiyonel) Depo yapısını görmek için
-      - name: Debug tree
-        run: ls -R
 
       - name: Restore previous state (if exists)
         uses: actions/cache@v4
         with:
           path: src/state.json
-          # Dal ve işletim sistemi bazlı anahtar; gerektiğinde -v2 gibi son ekle reset için
           key: state-${{ runner.os }}-${{ github.ref_name }}
           restore-keys: |
             state-${{ runner.os }}-${{ github.ref_name }}
@@ -47,16 +38,15 @@ jobs:
 
       - name: Run scheduler
         env:
-  DRY_RUN: false
-  FORCE_POST_NOW: true
           TW_CONSUMER_KEY: ${{ secrets.TW_CONSUMER_KEY }}
           TW_CONSUMER_SECRET: ${{ secrets.TW_CONSUMER_SECRET }}
           TW_ACCESS_TOKEN: ${{ secrets.TW_ACCESS_TOKEN }}
           TW_ACCESS_TOKEN_SECRET: ${{ secrets.TW_ACCESS_TOKEN_SECRET }}
-          # Settings → Actions → Variables içinde DRY_RUN=true ise deneme modunda çalışır
-          DRY_RUN: ${{ vars.DRY_RUN || 'false' }}
-        run: |
-          python -u src/poster.py
+          DRY_RUN: false
+          TZ: Europe/Istanbul
+          WINDOW_SECONDS: "60"
+          FORCE_POST_NOW: ${{ github.event.inputs.override || 'false' }}
+        run: python -u src/poster.py
 
       - name: Show state after run
         if: always()
