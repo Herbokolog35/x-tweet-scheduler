@@ -17,8 +17,6 @@ on:
         required: false
         default: false
 
-permissions:
-  contents: read
   permissions:
   contents: write
 
