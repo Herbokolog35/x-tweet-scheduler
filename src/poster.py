@@ -22,6 +22,14 @@ DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 TWEETS_PATH = os.path.join(DATA_DIR, 'tweets.txt')
 HOURS_PATH = os.path.join(DATA_DIR, 'hours.txt')
 
+import os
+if os.getenv("FORCE_POST_NOW", "false").lower() == "true":
+    print("FORCE_POST_NOW=true → zaman kontrolü atlanacak.")
+    in_window = True
+else:
+    # mevcut in_window hesaplamanız burada kalsın
+    ...
+
 # Zaman dilimi
 IST = tz.gettz('Europe/Istanbul')
 
